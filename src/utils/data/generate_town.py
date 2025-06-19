@@ -93,7 +93,7 @@ class TownGenerator:
     
     def _generate_street_name(self) -> str:
         """Generate a realistic street name based on locale."""
-        patterns = self.street_patterns.get(self.locale, self.street_patterns["en_US"])
+        patterns = self.street_patterns.get(self.locale, self.street_patterns[self.locale])
         
         # Generate street name using various patterns
         patterns_methods = [

@@ -697,7 +697,7 @@ if __name__ == "__main__":
     NUM_PEOPLE = 1000
     OUTPUT_DIR = "data"
     FILENAME = "people_data.csv"
-    LOCALE = "en_US"
+    LOCALE = "en_GB"
     
     # Set a seed for reproducibility (optional)
     SEED = 42
