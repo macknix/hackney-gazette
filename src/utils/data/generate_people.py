@@ -40,6 +40,7 @@ Functions:
 import random
 import csv
 import os
+import json
 from datetime import datetime
 from typing import List, Dict, Optional
 import uuid
@@ -89,6 +90,9 @@ class PeopleGenerator:
         # Initialize Faker with specified locale
         self.fake = Faker(locale)
         self.locale = locale
+        
+        # Load street names from town_data.json if available
+        self.street_names = self._load_street_names()
         
         # Education levels (universal across locales)
         self.education_levels = [
@@ -293,7 +297,7 @@ class PeopleGenerator:
             location = self.fake.address().split('\n')[0]  # First line of address
         
         # Generate full address
-        address = self.fake.address().replace('\n', ', ')
+        address = self._generate_address_with_town_streets()
         
         # Generate phone number
         phone = self.fake.phone_number()
@@ -605,68 +609,116 @@ class PeopleGenerator:
         
         print(f"Generated {num_people} demographic records and saved to: {filepath}")
         return filepath
+    
+    def _load_street_names(self) -> List[str]:
+        """
+        Load street names from data/town_data.json if it exists.
+        
+        Returns:
+            List[str]: List of street names, or empty list if file doesn't exist or can't be loaded.
+        """
+        try:
+            # Get the path relative to the project root
+            # This assumes the script is run from the project root or that data/town_data.json is accessible
+            town_data_path = os.path.join("data", "town_data.json")
+            
+            # Also try absolute path from current working directory
+            if not os.path.exists(town_data_path):
+                # Try from the directory containing this script
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                # Go up to project root (assuming script is in src/utils/data/)
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(script_dir)))
+                town_data_path = os.path.join(project_root, "data", "town_data.json")
+            
+            if os.path.exists(town_data_path):
+                with open(town_data_path, 'r', encoding='utf-8') as file:
+                    town_data = json.load(file)
+                    
+                # Extract street names from the JSON structure
+                street_names = []
+                if 'streets' in town_data and isinstance(town_data['streets'], list):
+                    for street in town_data['streets']:
+                        if isinstance(street, dict) and 'name' in street:
+                            street_names.append(street['name'])
+                
+                return street_names
+                
+        except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+            # Silently handle errors and fall back to default address generation
+            pass
+            
+        return []
+    
+    def _generate_address_with_town_streets(self) -> str:
+        """
+        Generate an address using street names from town_data.json if available,
+        otherwise fall back to Faker's default address generation.
+        
+        Returns:
+            str: Generated address
+        """
+        if self.street_names:
+            # Use a random street name from the loaded data
+            street_name = random.choice(self.street_names)
+            # Generate a house number
+            house_number = random.randint(1, 999)
+            # Generate the rest of the address using Faker
+            city = self.fake.city()
+            postcode = self.fake.postcode() if hasattr(self.fake, 'postcode') else self.fake.zipcode()
+            
+            # Construct the address
+            address = f"{house_number} {street_name}, {city}, {postcode}"
+            return address
+        else:
+            # Fall back to Faker's default address generation
+            return self.fake.address().replace('\n', ', ')
 
 
-def generate_demographic_csv(num_people: int, filename: str = "demographic_data.csv", 
-                            output_dir: str = ".", locale: str = "en_US", seed: Optional[int] = None) -> str:
+def generate_demographic_csv(num_people: int, filename: str, output_dir: str = "data", locale: str = "en_US", seed: Optional[int] = None) -> str:
     """
-    Convenience function to generate demographic data CSV.
+    Convenience function for quick CSV generation of demographic data.
     
     Args:
         num_people (int): Number of people to generate.
         filename (str): Name of the CSV file.
-        output_dir (str): Directory to save the file.
-        locale (str): Faker locale to use for data generation.
-        seed (int, optional): Random seed for reproducible results.
+        output_dir (str): Directory to save the file. Defaults to "data".
+        locale (str): Faker locale to use for generation. Defaults to "en_US".
+        seed (Optional[int]): Random seed for reproducible results.
         
     Returns:
         str: Full path to the created CSV file.
-        
-    Raises:
-        ValueError: If num_people is not positive or locale is invalid.
     """
-    if not isinstance(num_people, int) or num_people <= 0:
-        raise ValueError("num_people must be a positive integer")
-    
-    if locale not in PeopleGenerator.get_available_locales():
-        raise ValueError(f"Invalid locale '{locale}'. Available locales: {PeopleGenerator.get_available_locales()}")
-    
     generator = PeopleGenerator(locale=locale, seed=seed)
     return generator.save_to_csv(num_people, filename, output_dir)
 
 
 if __name__ == "__main__":
-    # Show available locales
-    print("Available locales:")
-    available_locales = PeopleGenerator.get_available_locales()
-    for locale in available_locales:
-        temp_gen = PeopleGenerator(locale=locale)
-        print(f"  {locale}: {temp_gen.get_country_name()}")
+    # Define parameters for data generation
+    NUM_PEOPLE = 1000
+    OUTPUT_DIR = "data"
+    FILENAME = "people_data.csv"
+    LOCALE = "en_GB"
     
-    print("\n" + "="*50)
+    # Set a seed for reproducibility (optional)
+    SEED = 42
     
-    # Example usage with different locales
-    locale = "en_GB"
+    # Create the output directory if it doesn't exist
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    
+    print(f"Generating demographic data for {NUM_PEOPLE} people...")
     
     try:
-        print(f"\nGenerating data for {locale}:")
-        generator = PeopleGenerator(locale=locale, seed=42)
-        
-        # Generate sample data
-        dataset = generator.generate_dataset(3)
-        print(f"Sample generated data for {generator.get_country_name()}:")
-        for person in dataset:
-            print(f"  {person['first_name']} {person['last_name']}, Age: {person['age']}, "
-                    f"Location: {person['location']}, Temperament: {person['temperament_type']}")
-        
-        # Generate and save CSV for this locale
-        filepath = generator.save_to_csv(
-            num_people=100,
-            filename=f"demographic_data.csv",
-            output_dir="data"
+        # Generate data and save to CSV
+        filepath = generate_demographic_csv(
+            num_people=NUM_PEOPLE,
+            filename=FILENAME,
+            output_dir=OUTPUT_DIR,
+            locale=LOCALE,
+            seed=SEED
         )
         
+        print(f"Successfully generated data and saved to: {filepath}")
+        print(f"Total records: {NUM_PEOPLE}")
+        
     except Exception as e:
-        print(f"Error generating data for {locale}: {e}")
-    
-    print(f"\nGenerated CSV files saved to 'data' directory.")
+        print(f"Error generating data: {e}")
