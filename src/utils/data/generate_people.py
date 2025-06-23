@@ -41,8 +41,9 @@ import random
 import csv
 import os
 import json
+import yaml
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import uuid
 from faker import Faker
 
@@ -50,29 +51,8 @@ from faker import Faker
 class PeopleGenerator:
     """
     Generates realistic demographic data using the Faker library.
+    Configuration is loaded from people_config.yaml.
     """
-    
-    # Constants for age ranges
-    MIN_AGE = 18
-    MAX_AGE = 99
-    WORKING_AGE_START = 25
-    WORKING_AGE_END = 65
-    RETIREMENT_AGE = 65
-    
-    # Constants for income ranges
-    MIN_INCOME = 0
-    UNEMPLOYED_MAX_INCOME = 15000
-    RETIRED_MIN_INCOME = 20000
-    RETIRED_MAX_INCOME = 60000
-    PART_TIME_MIN_INCOME = 15000
-    PART_TIME_MAX_INCOME = 40000
-    
-    # Age multipliers for income
-    PEAK_EARNING_AGE_START = 30
-    PEAK_EARNING_AGE_END = 55
-    PEAK_EARNING_MULTIPLIER = 1.2
-    NORMAL_EARNING_MULTIPLIER = 1.0
-    REDUCED_EARNING_MULTIPLIER = 0.8
     
     def __init__(self, locale: str = "en_US", seed: Optional[int] = None):
         """
@@ -83,6 +63,9 @@ class PeopleGenerator:
                          Examples: "en_US", "en_GB", "fr_FR", "de_DE", "es_ES", "it_IT", etc.
             seed (int, optional): Random seed for reproducible results.
         """
+        # Load configuration from YAML file
+        self.config = self._load_config()
+        
         if seed is not None:
             random.seed(seed)
             Faker.seed(seed)
@@ -94,108 +77,69 @@ class PeopleGenerator:
         # Load street names from town_data.json if available
         self.street_names = self._load_street_names()
         
-        # Education levels (universal across locales)
-        self.education_levels = [
+        # Get constants from config
+        age_ranges = self.config.get('age_ranges', {})
+        self.MIN_AGE = age_ranges.get('min_age', 18)
+        self.MAX_AGE = age_ranges.get('max_age', 99)
+        self.WORKING_AGE_START = age_ranges.get('working_age_start', 25)
+        self.WORKING_AGE_END = age_ranges.get('working_age_end', 65)
+        self.RETIREMENT_AGE = age_ranges.get('retirement_age', 65)
+        
+        income_ranges = self.config.get('income_ranges', {})
+        self.MIN_INCOME = income_ranges.get('min_income', 0)
+        self.UNEMPLOYED_MAX_INCOME = income_ranges.get('unemployed_max_income', 15000)
+        self.RETIRED_MIN_INCOME = income_ranges.get('retired_min_income', 20000)
+        self.RETIRED_MAX_INCOME = income_ranges.get('retired_max_income', 60000)
+        self.PART_TIME_MIN_INCOME = income_ranges.get('part_time_min_income', 15000)
+        self.PART_TIME_MAX_INCOME = income_ranges.get('part_time_max_income', 40000)
+        
+        income_age_multipliers = self.config.get('income_age_multipliers', {})
+        self.PEAK_EARNING_AGE_START = income_age_multipliers.get('peak_earning_age_start', 30)
+        self.PEAK_EARNING_AGE_END = income_age_multipliers.get('peak_earning_age_end', 55)
+        self.PEAK_EARNING_MULTIPLIER = income_age_multipliers.get('peak_earning_multiplier', 1.2)
+        self.NORMAL_EARNING_MULTIPLIER = income_age_multipliers.get('normal_earning_multiplier', 1.0)
+        self.REDUCED_EARNING_MULTIPLIER = income_age_multipliers.get('reduced_earning_multiplier', 0.8)
+        
+        # Load lists from config
+        self.education_levels = self.config.get('education_levels', [
             "Less than high school",
-            "High school diploma/GED", 
-            "Some college, no degree",
-            "Associate degree",
-            "Bachelor's degree",
-            "Master's degree",
-            "Professional degree",
-            "Doctoral degree"
-        ]
+            "High school diploma/GED"]) 
         
         # Employment status (universal across locales)
-        self.employment_status = [
+        self.employment_status = self.config.get('employment_status', [
             "Employed full-time",
-            "Employed part-time", 
+            "Employed part-time",
             "Unemployed",
             "Retired",
             "Student",
             "Homemaker",
             "Disabled",
             "Self-employed"
-        ]
+        ])
         
         # Marital status (universal across locales)
-        self.marital_status = [
+        self.marital_status = self.config.get('marital_status', [
             "Single",
-            "Married", 
+            "Married",
             "Divorced",
             "Widowed",
             "Separated",
             "Domestic partnership"
-        ]
+        ])
         
         # Temperament types with descriptions
-        self.temperaments = [
+        self.temperaments = self.config.get('temperaments', [
             {
                 "type": "Optimistic",
                 "description": "Generally positive outlook, sees the good in situations",
                 "traits": ["positive", "hopeful", "cheerful"]
-            },
-            {
-                "type": "Pessimistic", 
-                "description": "Tends to focus on negative aspects, expects the worst",
-                "traits": ["negative", "doubtful", "cynical"]
-            },
-            {
-                "type": "Calm",
-                "description": "Even-tempered, rarely shows strong emotions",
-                "traits": ["peaceful", "composed", "steady"]
-            },
-            {
-                "type": "Anxious",
-                "description": "Prone to worry and nervousness",
-                "traits": ["worried", "nervous", "apprehensive"]
-            },
-            {
-                "type": "Outgoing",
-                "description": "Social, enjoys being around people",
-                "traits": ["social", "extroverted", "friendly"]
-            },
-            {
-                "type": "Reserved",
-                "description": "Quiet, prefers solitude or small groups",
-                "traits": ["introverted", "quiet", "private"]
-            },
-            {
-                "type": "Aggressive",
-                "description": "Quick to anger, confrontational",
-                "traits": ["assertive", "forceful", "competitive"]
-            },
-            {
-                "type": "Patient",
-                "description": "Tolerant, slow to anger",
-                "traits": ["tolerant", "understanding", "gentle"]
-            },
-            {
-                "type": "Ambitious",
-                "description": "Driven, goal-oriented",
-                "traits": ["motivated", "determined", "focused"]
-            },
-            {
-                "type": "Laid-back",
-                "description": "Relaxed, goes with the flow",
-                "traits": ["relaxed", "easygoing", "flexible"]
-            },
-            {
-                "type": "Analytical",
-                "description": "Logical, thinks things through carefully",
-                "traits": ["logical", "methodical", "rational"]
-            },
-            {
-                "type": "Impulsive",
-                "description": "Acts on instinct, makes quick decisions",
-                "traits": ["spontaneous", "instinctive", "reactive"]
             }
-        ]
+        ])
         
         # Locale-specific country name mapping
-        self.country_mapping = {
+        self.country_mapping = self.config.get('country_mapping', {
             "en_US": "United States",
-            "en_GB": "United Kingdom", 
+            "en_GB": "United Kingdom",
             "en_CA": "Canada",
             "fr_FR": "France",
             "de_DE": "Germany",
@@ -214,7 +158,24 @@ class PeopleGenerator:
             "da_DK": "Denmark",
             "fi_FI": "Finland",
             "pl_PL": "Poland"
-        }
+        })
+    
+    def _load_config(self) -> Dict[str, Any]:
+        """
+        Load configuration from people_config.yaml file.
+        
+        Returns:
+            Dict[str, Any]: Configuration dictionary.
+        """
+        try:
+            # First try to load from the current directory
+            config_path = os.path.join(os.path.dirname(__file__), 'people_config.yaml')
+            
+            with open(config_path, 'r', encoding='utf-8') as f:
+                return yaml.safe_load(f)
+        except (FileNotFoundError, yaml.YAMLError) as e:
+            print(f"Warning: Could not load people_config.yaml: {e}")
+            return {}
     
     @classmethod
     def get_available_locales(cls) -> List[str]:
@@ -224,6 +185,17 @@ class PeopleGenerator:
         Returns:
             List[str]: List of available locale codes.
         """
+        try:
+            # Try to load from config file
+            config_path = os.path.join(os.path.dirname(__file__), 'people_config.yaml')
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+                if 'available_locales' in config:
+                    return config['available_locales']
+        except (FileNotFoundError, yaml.YAMLError):
+            # Fall back to hardcoded values
+            pass
+            
         return [
             "en_US",  # United States
             "en_GB",  # United Kingdom
@@ -504,6 +476,39 @@ class PeopleGenerator:
     
     def _get_age_weight_adjustment(self, temperament_type: str, age: int) -> float:
         """Get age-based weight adjustment for temperament."""
+        # Get adjustments from config if available
+        try:
+            age_adjustments = self.config.get('temperament_weight_adjustments', {}).get('age_based', {})
+            if temperament_type in age_adjustments:
+                temp_adj = age_adjustments[temperament_type]
+                
+                # Process adjustments based on age ranges
+                for age_range, value in temp_adj.items():
+                    if age_range == "<30" and age < 30:
+                        return value
+                    elif age_range == ">60" and age > 60:
+                        return value
+                    elif age_range == ">50" and age > 50:
+                        return value
+                    elif age_range == "<25" and age < 25:
+                        return value
+                    elif age_range == "25-45" and 25 <= age <= 45:
+                        return value
+                    elif age_range == ">65" and age > 65:
+                        return value
+                    elif age_range == ">40" and age > 40:
+                        return value
+                    elif age_range == ">50" and age > 50:
+                        return value
+                
+                # Return default if no specific range matched
+                if "default" in temp_adj:
+                    return temp_adj["default"]
+        except (KeyError, TypeError):
+            # Fall back to hardcoded values if config is not available
+            pass
+            
+        # Fallback adjustments if not in config
         adjustments = {
             "Anxious": 0.5 if age < 30 else -0.2 if age > 60 else 0,
             "Calm": 0.3 if age > 50 else -0.1 if age < 25 else 0,
@@ -518,6 +523,27 @@ class PeopleGenerator:
         """Get education-based weight adjustment for temperament."""
         adjustment = 0
         
+        try:
+            # Get education adjustments from config
+            education_adjustments = self.config.get('temperament_weight_adjustments', {}).get('education_based', {})
+            
+            if temperament_type in education_adjustments:
+                if "has_degree" in education_adjustments[temperament_type] and "degree" in education.lower():
+                    adjustment += education_adjustments[temperament_type]["has_degree"]
+                    
+                if "advanced_degree" in education_adjustments[temperament_type] and any(level in education for level in ["Master's", "Doctoral", "Professional"]):
+                    adjustment += education_adjustments[temperament_type]["advanced_degree"]
+                    
+                if "bachelor_or_masters" in education_adjustments[temperament_type] and any(level in education for level in ["Bachelor's", "Master's"]):
+                    adjustment += education_adjustments[temperament_type]["bachelor_or_masters"]
+                    
+            return adjustment
+            
+        except (KeyError, TypeError):
+            # Fall back to hardcoded logic
+            pass
+        
+        # Fallback logic
         if temperament_type == "Analytical":
             if "degree" in education.lower():
                 adjustment += 0.3
@@ -531,14 +557,39 @@ class PeopleGenerator:
     
     def _get_employment_weight_adjustment(self, temperament_type: str, employment: str) -> float:
         """Get employment-based weight adjustment for temperament."""
+        try:
+            # Get employment adjustments from config
+            employment_adjustments = self.config.get('temperament_weight_adjustments', {}).get('employment_based', {})
+            
+            if temperament_type in employment_adjustments:
+                if "Unemployed" in employment_adjustments[temperament_type] and "Unemployed" in employment:
+                    return employment_adjustments[temperament_type]["Unemployed"]
+                    
+                if "Student" in employment_adjustments[temperament_type] and "Student" in employment:
+                    return employment_adjustments[temperament_type]["Student"]
+                    
+                if "management_sales_law" in employment_adjustments[temperament_type] and any(job in employment for job in ["Manager", "Sales", "Lawyer"]):
+                    return employment_adjustments[temperament_type]["management_sales_law"]
+                    
+                if "Retired" in employment_adjustments[temperament_type] and "Retired" in employment:
+                    return employment_adjustments[temperament_type]["Retired"]
+                    
+                if "unemployment_disability" in employment_adjustments[temperament_type] and any(status in employment for status in ["Unemployed", "Disabled"]):
+                    return employment_adjustments[temperament_type]["unemployment_disability"]
+            
+        except (KeyError, TypeError):
+            # Fall back to hardcoded values
+            pass
+            
+        # Fallback adjustments
         adjustments = {
             "Anxious": (0.5 if "Unemployed" in employment else 
-                       0.2 if "Student" in employment else 0),
+                      0.2 if "Student" in employment else 0),
             "Aggressive": (0.2 if any(job in employment for job in ["Manager", "Sales", "Lawyer"]) 
-                          else 0),
+                         else 0),
             "Laid-back": 0.4 if "Retired" in employment else 0,
             "Pessimistic": (0.3 if any(status in employment for status in ["Unemployed", "Disabled"]) 
-                           else 0),
+                          else 0),
         }
         return adjustments.get(temperament_type, 0)
     
@@ -693,14 +744,23 @@ def generate_demographic_csv(num_people: int, filename: str, output_dir: str = "
 
 
 if __name__ == "__main__":
-    # Define parameters for data generation
-    NUM_PEOPLE = 1000
-    OUTPUT_DIR = "data"
-    FILENAME = "people_data.csv"
-    LOCALE = "en_GB"
+    # Load configuration
+    config_path = os.path.join(os.path.dirname(__file__), 'people_config.yaml')
+    defaults = {}
     
-    # Set a seed for reproducibility (optional)
-    SEED = 42
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+            defaults = config.get('generation_defaults', {})
+    except (FileNotFoundError, yaml.YAMLError) as e:
+        print(f"Warning: Could not load people_config.yaml: {e}")
+    
+    # Define parameters for data generation, using config if available
+    NUM_PEOPLE = defaults.get('num_people', 1000)
+    OUTPUT_DIR = defaults.get('output_dir', "data")
+    FILENAME = defaults.get('filename', "people_data.csv")
+    LOCALE = defaults.get('locale', "en_GB")
+    SEED = defaults.get('seed', 42)
     
     # Create the output directory if it doesn't exist
     os.makedirs(OUTPUT_DIR, exist_ok=True)
