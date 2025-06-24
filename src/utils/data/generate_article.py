@@ -7,8 +7,10 @@ import json
 import random
 import datetime
 import pandas as pd
+import httpx
+import time
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from src.utils.llm.openai import call_openai_api
 
@@ -174,21 +176,36 @@ def generate_article_content(
         title = response_data.get('title', f"Article about {category}")
         body = response_data.get('body', "No content generated.")
         summary = response_data.get('summary', "No summary available.")
+        # Extract image suggestions (defaulting to empty list if not provided)
+        images = response_data.get('images', [])
+        # Extract story status (defaulting to "ongoing" if not provided)
+        story_status = response_data.get('story_status', "ongoing")
+        # Normalize story status to ensure it's either "ongoing" or "concluded"
+        story_status = story_status.lower().strip()
+        if story_status not in ["ongoing", "concluded"]:
+            story_status = "ongoing"  # Default if invalid value
         
         print(f"\nGenerated title: {title}")
         print(f"\nSummary: {summary[:100]}...")
+        print(f"\nStory status: {story_status}")
+        if images:
+            print(f"\nSuggested {len(images)} images for the article")
         
         return {
             'title': title,
             'body': body,
-            'summary': summary
+            'summary': summary,
+            'story_status': story_status,
+            'images': images
         }
     except Exception as e:
         print(f"\nError generating article content: {e}")
         return {
             'title': f"Placeholder Title for {category} Article",
             'body': "This is a placeholder for the article body.",
-            'summary': "This is a placeholder summary."
+            'summary': "This is a placeholder summary.",
+            'story_status': 'ongoing',  # Default story status in case of error
+            'images': []  # Empty array for images in case of error
         }
 
 def create_new_story():
@@ -404,13 +421,29 @@ def create_new_story():
     # Generate article content using OpenAI
     content = generate_article_content(category, author_info, article_town_data, article_people_data, seriousness, config)
     
-    # Create article with generated content
+    # Get the generated image suggestions
+    images = content.get('images', [])
+    # Ensure images is a list before proceeding
+    if images is None:
+        images = []
+    
+    # Search for actual images based on the suggestions
+    if images and len(images) > 0:
+        print("\n=== SEARCHING FOR ARTICLE IMAGES ===")
+        images_with_urls = search_for_article_images(images)
+    else:
+        images_with_urls = []
+    
+    # Convert the enhanced image list to a JSON string for storage
+    images_json = json.dumps(images_with_urls)
+    
     article = {
         'article_id': article_id,
         'title': content['title'],
         'slug': content['title'].lower().replace(' ', '-').replace(',', '').replace('.', '').replace('\'', '').replace('"', '')[:50],
         'body': content['body'],
         'summary': content['summary'],
+        'images': images_json,  # Add the images as a JSON string
         'publication_date': datetime.datetime.now().strftime('%Y-%m-%d'),
         'last_updated': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'author': author_name,
@@ -418,7 +451,7 @@ def create_new_story():
         'author_style': author_style,
         'category': category,
         'status': 'Draft',
-        'story_status': 'Ongoing',
+        'story_status': content.get('story_status', 'Ongoing'),  # Use the LLM-provided story status
         'seriousness': seriousness,
     }
     
@@ -430,7 +463,7 @@ def create_new_story():
     
     # Define expected columns for the DataFrame
     expected_columns = [
-        'article_id', 'title', 'slug', 'body', 'summary', 
+        'article_id', 'title', 'slug', 'body', 'summary', 'images',
         'publication_date', 'last_updated', 'author', 
         'author_persona', 'author_style', 'category', 
         'status', 'story_status', 'town_data', 'people_data',
@@ -484,6 +517,139 @@ def create_new_story():
     
     print(f"Created new article with ID: {article_id}")
     return article
+
+def search_for_image(query: str, credentials_path: Optional[str] = None) -> Dict[str, str]:
+    """
+    Search for an image using the Unsplash API based on a query.
+    
+    Args:
+        query: The search query string
+        credentials_path: Optional path to credentials file containing API keys
+        
+    Returns:
+        Dict containing the image URL, alt text, credit info, etc.
+    """
+    # First try to get API key from environment or credentials file
+    api_key = os.environ.get('UNSPLASH_ACCESS_KEY')
+    
+    # If not found in environment, try to load from credentials file
+    if not api_key and credentials_path:
+        try:
+            with open(credentials_path, 'r') as file:
+                creds = json.load(file)
+                api_key = creds.get('UNSPLASH_ACCESS_KEY')
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            print(f"Error loading credentials: {e}")
+    
+    # If still no API key, try default location
+    if not api_key:
+        default_creds_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), 'credentials')
+        print(f"Looking for credentials file at: {default_creds_path}")
+        try:
+            with open(default_creds_path, 'r') as file:
+                creds = json.load(file)
+                api_key = creds.get('UNSPLASH_ACCESS_KEY')
+                if api_key:
+                    print("Found Unsplash API key in credentials file")
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            print(f"Error loading default credentials: {e}")
+    
+    # If no API key is available, fall back to a placeholder
+    if not api_key:
+        print("No Unsplash API key found. Using placeholder image.")
+        return {
+            "url": f"https://via.placeholder.com/800x600?text={query.replace(' ', '+')}",
+            "alt_text": query,
+            "credit": "Placeholder Image",
+            "source": "placeholder.com",
+            "search_query": query
+        }
+    
+    # Make request to Unsplash API
+    try:
+        # Prepare the API request
+        url = "https://api.unsplash.com/search/photos"
+        params = {
+            "query": query,
+            "per_page": 1,  # We just need one image
+            "orientation": "landscape",  # Better for articles
+        }
+        headers = {
+            "Authorization": f"Client-ID {api_key}"
+        }
+        
+        # Send the request
+        response = httpx.get(url, params=params, headers=headers, timeout=10.0)
+        response.raise_for_status()  # Raise exception for error responses
+        
+        # Parse the results
+        data = response.json()
+        results = data.get('results', [])
+        
+        if results:
+            image = results[0]
+            return {
+                "url": image["urls"]["regular"],
+                "thumb_url": image["urls"]["thumb"],
+                "alt_text": image.get("alt_description", query) or query,
+                "credit": f"Photo by {image['user']['name']} on Unsplash",
+                "credit_link": image['user']['links']['html'],
+                "source": "Unsplash",
+                "search_query": query
+            }
+        else:
+            print(f"No image results found for query: {query}")
+            return {
+                "url": f"https://via.placeholder.com/800x600?text={query.replace(' ', '+')}",
+                "alt_text": query,
+                "credit": "Placeholder Image",
+                "source": "placeholder.com",
+                "search_query": query
+            }
+            
+    except Exception as e:
+        print(f"Error searching for image: {e}")
+        # Return a placeholder image as fallback
+        return {
+            "url": f"https://via.placeholder.com/800x600?text={query.replace(' ', '+')}",
+            "alt_text": query,
+            "credit": "Placeholder Image",
+            "source": "placeholder.com",
+            "search_query": query
+        }
+
+def search_for_article_images(article_images: List[Dict[str, str]], credentials_path: Optional[str] = None) -> List[Dict[str, str]]:
+    """
+    Search for all images needed for an article.
+    
+    Args:
+        article_images: List of image objects with 'image' (query) and 'caption' fields
+        credentials_path: Optional path to credentials file containing API keys
+        
+    Returns:
+        List of image objects with URLs and metadata added
+    """
+    enhanced_images = []
+    
+    for i, img in enumerate(article_images):
+        print(f"\nSearching for image {i+1}/{len(article_images)}: {img['image']}")
+        
+        # Rate limiting to avoid API throttling
+        if i > 0:
+            time.sleep(1)  # Wait 1 second between requests
+            
+        # Get image info from search
+        image_info = search_for_image(img['image'], credentials_path)
+        
+        # Create enhanced image object with original data plus search results
+        enhanced_image = {
+            **img,  # Include original image and caption
+            **image_info  # Add the URL and other metadata
+        }
+        
+        enhanced_images.append(enhanced_image)
+        
+    return enhanced_images
 
 if __name__ == "__main__":
     create_new_story()

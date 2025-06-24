@@ -32,7 +32,30 @@ prompts:
     
     {people_context}
     
-    Format your response in JSON with these fields: title (a catchy headline), body (the full article text), and summary (a brief 1-2 sentence summary).
+    Format your response in the following JSON structure:
+    ```json
+    {{
+      "title": "A catchy headline for your article",
+      "body": "The full article text with all paragraphs...",
+      "summary": "A brief 1-2 sentence summary of the article",
+      "story_status": "ongoing or concluded",
+      "images": [
+        {{
+          "image": "search query that could be used to find image 1",
+          "caption": "Descriptive caption for image 1"
+        }},
+        {{
+          "image": "search query that could be used to find image 2",
+          "caption": "Descriptive caption for image 2"
+        }}
+      ]
+    }}
+    ```
+    
+    For the "story_status" field, specify whether the news story is "ongoing" (the situation is still developing, requires follow-up reporting) or "concluded" (the story is complete, no follow-up needed). This helps our editorial team plan content.
+    
+    Provide 2-3 relevant images in the images array, ensuring each has both an image search query and descriptive caption.
+    
   
   # Tone descriptions for different seriousness levels
   tone_descriptions:

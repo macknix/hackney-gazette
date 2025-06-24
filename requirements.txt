@@ -2,3 +2,4 @@ faker
 pyyaml
 openai>=1.0.0
 pandas
+httpx>=0.28.0
