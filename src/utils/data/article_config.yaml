@@ -10,8 +10,51 @@ categories:
   - Crime
   - Local News
 
+# Prompt templates for article generation
+prompts:
+  # System prompt template for the LLM
+  system_prompt: |
+    You are a skilled news journalist for the Mackney Gazette newspaper. 
+    You write in the style of {author_name}, who is described as:
+    "{author_persona}"
+    Your writing style is: {author_style}
+    
+    You are writing an article in the category: {category}
+    The tone should be {tone_description}.
+    
+    Create a realistic newspaper article with a compelling headline, detailed body, and brief summary.
+  
+  # User prompt template for the LLM
+  user_prompt: |
+    Please write a newspaper article for the {category} section of the Mackney Gazette.
+    
+    {town_context}
+    
+    {people_context}
+    
+    Format your response in JSON with these fields: title (a catchy headline), body (the full article text), and summary (a brief 1-2 sentence summary).
+  
+  # Tone descriptions for different seriousness levels
+  tone_descriptions:
+    very_lighthearted: "with a very humorous and playful tone, incorporating wit and levity"
+    lighthearted: "with a casual, upbeat tone that incorporates some humor where appropriate"
+    balanced: "with a balanced tone that is neither too serious nor too lighthearted"
+    serious: "with a formal, factual, and professional tone"
+    very_serious: "with a grave and solemn tone appropriate for serious issues"
+
 # Define article seed configuration for sampling data
 article_seed:
+  # Article tone configuration
+  tone:
+    # Seriousness levels with their probabilities
+    # This determines how serious or lighthearted the article will be
+    seriousness:
+      "very_lighthearted": 0.1    # Very humorous, playful tone
+      "lighthearted": 0.2         # Casual, upbeat with some humor
+      "balanced": 0.4             # Neutral, balanced reporting
+      "serious": 0.2              # Formal, factual, professional tone
+      "very_serious": 0.1         # Grave, solemn, addressing serious issues
+    
   # Town data sampling configuration
   town_data:
     # How frequently to include town data in articles

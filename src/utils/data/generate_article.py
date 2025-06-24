@@ -8,6 +8,9 @@ import random
 import datetime
 import pandas as pd
 from pathlib import Path
+from typing import Dict, Any, List
+
+from src.utils.llm.openai import call_openai_api
 
 def load_config(config_file):
     """
@@ -54,6 +57,139 @@ def load_people_data(file_path):
     except Exception as e:
         print(f"Error loading people data: {e}")
         return pd.DataFrame()
+
+def generate_article_content(
+    category: str,
+    author_info: Dict[str, Any],
+    article_town_data: Dict[str, Any] = None,
+    article_people_data: List[Dict[str, Any]] = None,
+    seriousness: str = "balanced",
+    config: Dict[str, Any] = None
+) -> Dict[str, str]:
+    """
+    Generate article title, body, and summary using the OpenAI API.
+    
+    Args:
+        category: The article category (e.g., Politics, Sports)
+        author_info: Information about the author including name, persona, and writing style
+        article_town_data: Optional town data to include in the article
+        article_people_data: Optional list of people data to include in the article
+        seriousness: The tone of the article from very_lighthearted to very_serious
+        config: Configuration data loaded from article_config.yaml
+        
+    Returns:
+        Dictionary containing the generated title, body, and summary
+    """
+    print("\n=== GENERATING ARTICLE CONTENT WITH OPENAI ===")
+    
+    # If config is not provided, load it
+    if config is None:
+        current_dir = Path(__file__).parent
+        config_file = current_dir / 'article_config.yaml'
+        config = load_config(config_file)
+    
+    # Get prompt templates from config
+    prompt_templates = config.get('prompts', {})
+    
+    # Get tone description from config
+    tone_descriptions = prompt_templates.get('tone_descriptions', {})
+    tone_description = tone_descriptions.get(seriousness, tone_descriptions.get("balanced", "with a balanced tone"))
+    
+    # Create system prompt using template from config
+    system_prompt_template = prompt_templates.get('system_prompt', '')
+    system_prompt = system_prompt_template.format(
+        author_name=author_info['name'],
+        author_persona=author_info['persona'],
+        author_style=author_info.get('writing_style', 'professional'),
+        category=category,
+        tone_description=tone_description
+    )
+    
+    # Build town context string
+    town_context = ""
+    if article_town_data and article_town_data.get('town_name'):
+        town_context += f"The article should be set in {article_town_data['town_name']}, "
+        town_context += f"a town with a population of {article_town_data.get('town_population', 'unknown')}. "
+        town_context += "there is no need to mention the town's name in the article body, but it should be clear where the article is set for example you can use the street names."
+        
+        # Add featured streets if available
+        if 'town_features' in article_town_data and 'streets' in article_town_data['town_features']:
+            streets = article_town_data['town_features']['streets']
+            if streets:
+                town_context += f"You may mention these streets: {', '.join([s.get('name', 'Unknown Street') for s in streets])}. "
+                
+        # Add landmarks if available
+        if 'town_features' in article_town_data and 'landmarks' in article_town_data['town_features']:
+            landmarks = article_town_data['town_features']['landmarks']
+            if landmarks:
+                town_context += f"You may mention these landmarks: {', '.join([l.get('name', 'Unknown Landmark') for l in landmarks])}. "
+                
+        # Add businesses if available
+        if 'town_features' in article_town_data and 'businesses' in article_town_data['town_features']:
+            businesses = article_town_data['town_features']['businesses']
+            if businesses:
+                town_context += f"You may mention these local businesses: {', '.join([b.get('name', 'Unknown Business') for b in businesses])}. "
+    
+    # Build people context string
+    people_context = ""
+    if article_people_data and len(article_people_data) > 0:
+        people_context += "Include quotes from these people in your article:\n"
+        for person in article_people_data:
+            name = f"{person.get('first_name', '')} {person.get('last_name', '')}"
+            people_context += f"- {name}, {person.get('age', 'Unknown')}, {person.get('occupation', 'resident')}"
+            if person.get('temperament_type'):
+                people_context += f", who tends to be {person.get('temperament_description', 'a local resident')}"
+            people_context += ".\n"
+    
+    # Create user prompt using template from config
+    user_prompt_template = prompt_templates.get('user_prompt', '')
+    user_prompt = user_prompt_template.format(
+        category=category,
+        town_context=town_context,
+        people_context=people_context
+    )
+    
+    # Create messages for the API call
+    messages = [
+        {'role': 'user', 'content': user_prompt}
+    ]
+    
+    # Set model parameters for article generation
+    model_args = {
+        'model': 'gpt-4o-mini',  # Use the appropriate model
+        'temperature': 0.8,  # Slightly higher temperature for creativity
+        'max_tokens': 2000,  # Allow enough tokens for a full article
+        'response_format': {'type': 'json_object'}  # Request JSON response
+    }
+    
+    try:
+        # Call the OpenAI API
+        response_text = call_openai_api(system_prompt, messages, model_args)
+        
+        # Parse the JSON response
+        import json
+        response_data = json.loads(response_text)
+        
+        # Extract the article content
+        title = response_data.get('title', f"Article about {category}")
+        body = response_data.get('body', "No content generated.")
+        summary = response_data.get('summary', "No summary available.")
+        
+        print(f"\nGenerated title: {title}")
+        print(f"\nSummary: {summary[:100]}...")
+        
+        return {
+            'title': title,
+            'body': body,
+            'summary': summary
+        }
+    except Exception as e:
+        print(f"\nError generating article content: {e}")
+        return {
+            'title': f"Placeholder Title for {category} Article",
+            'body': "This is a placeholder for the article body.",
+            'summary': "This is a placeholder summary."
+        }
 
 def create_new_story():
     """
@@ -109,9 +245,18 @@ def create_new_story():
     article_town_data = {}
     article_people_data = []
     
+    # Sample article seriousness level
+    seriousness = "balanced"  # Default to balanced if not configured
+    if 'article_seed' in config and 'tone' in config['article_seed'] and 'seriousness' in config['article_seed']['tone']:
+        seriousness_weights = config['article_seed']['tone']['seriousness']
+        seriousness_levels = list(seriousness_weights.keys())
+        seriousness_probs = list(seriousness_weights.values())
+        seriousness = random.choices(seriousness_levels, weights=seriousness_probs, k=1)[0]
+    
     print(f"\n--- GENERATING ARTICLE {article_id} ---")
     print(f"Category: {category}")
     print(f"Author: {author_name} ({author_info['writing_style']})")
+    print(f"Tone: {seriousness.replace('_', ' ').title()}")
     
     # Sample town data if available and according to article_seed
     if town_data and 'article_seed' in config and 'town_data' in config['article_seed']:
@@ -170,7 +315,7 @@ def create_new_story():
             if 'businesses' in town_data and 'businesses' in feature_weights:
                 business_config = feature_weights['businesses']
                 if random.random() < business_config.get('probability', 0.5):
-                    max_businesses = business_config.get('max_count', 3)
+                    max_businesses = business_config.get('max_count', 2)
                     num_businesses = min(max_businesses, len(town_data.get('businesses', [])))
                     if num_businesses > 0:
                         sampled_businesses = random.sample(town_data['businesses'], num_businesses)
@@ -181,7 +326,7 @@ def create_new_story():
                             print(f"  - {business.get('name', 'Unknown Business')} ({business.get('type', 'Unknown Type')})")
                             print(f"    Located on: {business.get('street', 'Unknown Street')}")
                             print(f"    Founded: {business.get('founded_year', 'Unknown')}")
-                            
+            
             # Sample events if present
             sampled_events = []
             if 'events' in town_data and 'events' in feature_weights:
@@ -256,13 +401,16 @@ def create_new_story():
                 else:
                     print("No people matched the demographic filters.")
     
-    # Create article with minimal data for now
+    # Generate article content using OpenAI
+    content = generate_article_content(category, author_info, article_town_data, article_people_data, seriousness, config)
+    
+    # Create article with generated content
     article = {
         'article_id': article_id,
-        'title': f"Placeholder Title for {category} Article",
-        'slug': f"placeholder-title-for-{category.lower().replace(' ', '-')}-article",
-        'body': "This is a placeholder for the article body.",
-        'summary': "This is a placeholder summary.",
+        'title': content['title'],
+        'slug': content['title'].lower().replace(' ', '-').replace(',', '').replace('.', '').replace('\'', '').replace('"', '')[:50],
+        'body': content['body'],
+        'summary': content['summary'],
         'publication_date': datetime.datetime.now().strftime('%Y-%m-%d'),
         'last_updated': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'author': author_name,
@@ -271,6 +419,7 @@ def create_new_story():
         'category': category,
         'status': 'Draft',
         'story_status': 'Ongoing',
+        'seriousness': seriousness,
     }
     
     # Define the path to the CSV file in the data directory
@@ -284,7 +433,8 @@ def create_new_story():
         'article_id', 'title', 'slug', 'body', 'summary', 
         'publication_date', 'last_updated', 'author', 
         'author_persona', 'author_style', 'category', 
-        'status', 'story_status', 'town_data', 'people_data'
+        'status', 'story_status', 'town_data', 'people_data',
+        'seriousness'
     ]
     
     # Convert the article dictionary to a DataFrame
