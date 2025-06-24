@@ -1,2 +1,4 @@
 faker
 pyyaml
+openai>=1.0.0
+pandas
