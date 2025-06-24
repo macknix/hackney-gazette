@@ -453,6 +453,7 @@ def create_new_story():
         'status': 'Draft',
         'story_status': content.get('story_status', 'Ongoing'),  # Use the LLM-provided story status
         'seriousness': seriousness,
+        'parent_article_id': None,  # No parent article for new articles
     }
     
     # Define the path to the CSV file in the data directory
@@ -467,7 +468,7 @@ def create_new_story():
         'publication_date', 'last_updated', 'author', 
         'author_persona', 'author_style', 'category', 
         'status', 'story_status', 'town_data', 'people_data',
-        'seriousness'
+        'seriousness', 'parent_article_id'
     ]
     
     # Convert the article dictionary to a DataFrame
